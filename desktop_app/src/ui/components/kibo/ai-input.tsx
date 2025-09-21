@@ -60,47 +60,59 @@ export type AIInputTextareaProps = ComponentProps<typeof Textarea> & {
   minHeight?: number;
   maxHeight?: number;
 };
-export const AIInputTextarea = ({
-  onChange,
-  className,
-  placeholder = 'What would you like to know?',
-  minHeight = 48,
-  maxHeight = 164,
-  ...props
-}: AIInputTextareaProps) => {
-  const { textareaRef, adjustHeight } = useAutoResizeTextarea({
-    minHeight,
-    maxHeight,
-  });
-  const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      const form = e.currentTarget.form;
-      if (form) {
-        form.requestSubmit();
+export const AIInputTextarea = React.forwardRef<HTMLTextAreaElement, AIInputTextareaProps>(
+  (
+    { onChange, className, placeholder = 'What would you like to know?', minHeight = 48, maxHeight = 164, ...props },
+    forwardedRef
+  ) => {
+    const { textareaRef: internalRef, adjustHeight } = useAutoResizeTextarea({
+      minHeight,
+      maxHeight,
+    });
+
+    // Combine internal ref with forwarded ref
+    const combinedRef = useCallback(
+      (element: HTMLTextAreaElement | null) => {
+        internalRef.current = element;
+        if (typeof forwardedRef === 'function') {
+          forwardedRef(element);
+        } else if (forwardedRef) {
+          forwardedRef.current = element;
+        }
+      },
+      [internalRef, forwardedRef]
+    );
+    const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        const form = e.currentTarget.form;
+        if (form) {
+          form.requestSubmit();
+        }
       }
-    }
-  };
-  return (
-    <Textarea
-      className={cn(
-        'w-full resize-none rounded-none border-none p-3 shadow-none outline-none ring-0',
-        'bg-transparent dark:bg-transparent',
-        'focus-visible:ring-0',
-        className
-      )}
-      name="message"
-      onChange={(e) => {
-        adjustHeight();
-        onChange?.(e);
-      }}
-      onKeyDown={handleKeyDown}
-      placeholder={placeholder}
-      ref={textareaRef}
-      {...props}
-    />
-  );
-};
+    };
+    return (
+      <Textarea
+        className={cn(
+          'w-full resize-none rounded-none border-none p-3 shadow-none outline-none ring-0',
+          'bg-transparent dark:bg-transparent',
+          'focus-visible:ring-0',
+          className
+        )}
+        name="message"
+        onChange={(e) => {
+          adjustHeight();
+          onChange?.(e);
+        }}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        ref={combinedRef}
+        {...props}
+      />
+    );
+  }
+);
+AIInputTextarea.displayName = 'AIInputTextarea';
 
 export type AIInputToolbarProps = HTMLAttributes<HTMLDivElement>;
 export const AIInputToolbar = ({ className, ...props }: AIInputToolbarProps) => (

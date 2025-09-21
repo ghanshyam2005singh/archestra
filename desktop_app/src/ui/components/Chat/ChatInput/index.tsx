@@ -2,9 +2,10 @@
 
 import { Link } from '@tanstack/react-router';
 import { AlertCircle, FileText, Loader2, RefreshCw, X } from 'lucide-react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { deconstructToolId } from '@constants';
+import { SlashCommandDropdown } from '@ui/components/Chat/SlashCommandDropdown';
 import ChatTokenUsage from '@ui/components/ChatTokenUsage';
 import { ToolHoverCard } from '@ui/components/ToolHoverCard';
 import {
@@ -21,6 +22,7 @@ import {
   AIInputTools,
 } from '@ui/components/kibo/ai-input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/components/ui/tooltip';
+import { SlashCommand, isCompleteSlashCommand } from '@ui/lib/utils/slash-commands';
 import { cn } from '@ui/lib/utils/tailwind';
 import { formatToolName } from '@ui/lib/utils/tools';
 import {
@@ -49,6 +51,14 @@ interface ChatInputProps {
   onRerunAgent?: () => void;
   status?: 'submitted' | 'streaming' | 'ready' | 'error';
   isSubmitting?: boolean;
+  onSlashCommand?: (command: string) => boolean;
+  onInputUpdate?: (input: string, textareaRef?: HTMLTextAreaElement) => void;
+  slashCommandSuggestions?: Array<{ command: SlashCommand; description: string }>;
+  showSlashCommandSuggestions?: boolean;
+  selectedSlashCommandIndex?: number;
+  onSlashCommandSelect?: (command: SlashCommand) => void;
+  onHideSlashCommandSuggestions?: () => void;
+  onSelectedSlashCommandIndexChange?: (index: number) => void;
 }
 
 const PLACEHOLDER_EXAMPLES = [
@@ -77,6 +87,14 @@ export default function ChatInput({
   onRerunAgent,
   status = 'ready',
   isSubmitting = false,
+  onSlashCommand,
+  onInputUpdate,
+  slashCommandSuggestions = [],
+  showSlashCommandSuggestions = false,
+  selectedSlashCommandIndex = 0,
+  onSlashCommandSelect,
+  onHideSlashCommandSuggestions,
+  onSelectedSlashCommandIndexChange,
 }: ChatInputProps) {
   const { isDeveloperMode, toggleDeveloperMode } = useDeveloperModeStore();
   const { selectedModel, setSelectedModel } = useChatStore();
@@ -88,6 +106,8 @@ export default function ChatInput({
   // Rotating placeholder state
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
 
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
   // Rotate placeholder every 7 seconds
   useEffect(() => {
     const interval = setInterval(() => {
@@ -97,17 +117,77 @@ export default function ChatInput({
     return () => clearInterval(interval);
   }, []);
 
+  const handleInputChangeWithSlashCommands = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      handleInputChange(e);
+
+      if (onInputUpdate && textareaRef.current) {
+        onInputUpdate(e.target.value, textareaRef.current);
+      }
+    },
+    [handleInputChange, onInputUpdate]
+  );
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (showSlashCommandSuggestions && slashCommandSuggestions.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          const newIndex =
+            selectedSlashCommandIndex < slashCommandSuggestions.length - 1 ? selectedSlashCommandIndex + 1 : 0;
+          onSelectedSlashCommandIndexChange?.(newIndex);
+          return;
+        }
+
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          const newIndex =
+            selectedSlashCommandIndex > 0 ? selectedSlashCommandIndex - 1 : slashCommandSuggestions.length - 1;
+          onSelectedSlashCommandIndexChange?.(newIndex);
+          return;
+        }
+
+        if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+          e.preventDefault();
+          const selectedCommand = slashCommandSuggestions[selectedSlashCommandIndex];
+          if (selectedCommand && onSlashCommandSelect) {
+            onSlashCommandSelect(selectedCommand.command);
+          }
+          return;
+        }
+
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          onHideSlashCommandSuggestions?.();
+          return;
+        }
+      }
+
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
+
+        if (onSlashCommand && onSlashCommand(input)) {
+          return;
+        }
+
         // Only submit if a model is selected and not disabled
         if (!disabled) {
           handleSubmit();
         }
       }
     },
-    [handleSubmit, disabled]
+    [
+      handleSubmit,
+      disabled,
+      input,
+      onSlashCommand,
+      showSlashCommandSuggestions,
+      slashCommandSuggestions,
+      selectedSlashCommandIndex,
+      onSlashCommandSelect,
+      onHideSlashCommandSuggestions,
+      onSelectedSlashCommandIndexChange,
+    ]
   );
 
   // Helper function to find common prefix
@@ -524,15 +604,41 @@ export default function ChatInput({
           </div>
         )}
         <div className="relative">
+          <SlashCommandDropdown
+            suggestions={slashCommandSuggestions}
+            selectedIndex={selectedSlashCommandIndex}
+            onSelect={onSlashCommandSelect || (() => {})}
+            visible={showSlashCommandSuggestions}
+            inputRect={textareaRef.current?.getBoundingClientRect()}
+          />
+          {isCompleteSlashCommand(input) && (
+            <div
+              className="absolute inset-0 pointer-events-none z-0 overflow-hidden"
+              style={{
+                fontSize: 'inherit',
+                fontFamily: 'inherit',
+                lineHeight: 'inherit',
+                padding: '0.75rem 1rem',
+                whiteSpace: 'pre-wrap',
+                wordWrap: 'break-word',
+              }}
+            >
+              <span className="bg-gradient-to-r from-orange-400/40 to-amber-400/40 dark:from-orange-800/40 dark:to-amber-800/40 -mx-2 px-2 py-1 rounded-md text-transparent animate-pulse shadow-sm border border-orange-300/30 dark:border-orange-700/30">
+                {input.trim()}
+              </span>
+            </div>
+          )}
+
           <AIInputTextarea
+            ref={textareaRef}
             value={input}
-            onChange={handleInputChange}
+            onChange={handleInputChangeWithSlashCommands}
             onKeyDown={handleKeyDown}
             placeholder=""
             disabled={false}
             minHeight={48}
             maxHeight={164}
-            className="relative z-10"
+            className="relative z-10 bg-transparent"
           />
           {!input && !hasMessages && (
             <div className="absolute inset-0 flex items-start pointer-events-none overflow-hidden">
